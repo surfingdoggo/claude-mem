@@ -112,6 +112,7 @@ export interface SettingsDefaults {
   CLAUDE_MEM_SERVER_BETA_API_KEY: string;
   CLAUDE_MEM_SERVER_BETA_PROJECT_ID: string;
   CLAUDE_MEM_PROJECT_NAME_SOURCE: string;
+  CLAUDE_MEM_WORKER_AUTOSTART: string;
 }
 
 export class SettingsDefaultsManager {
@@ -195,6 +196,7 @@ export class SettingsDefaultsManager {
     CLAUDE_MEM_QUEUE_REDIS_PREFIX: `claude_mem_${process.env.CLAUDE_MEM_WORKER_PORT ?? String(37700 + ((process.getuid?.() ?? 77) % 100))}`,
     CLAUDE_MEM_AUTH_MODE: 'api-key',
     CLAUDE_MEM_RUNTIME: 'worker',
+<<<<<<< HEAD
     // Phase 1a (cmem-sdk rename): canonical server settings keys. Hooks read
     // these first; the legacy `*_BETA_*` defaults below remain so existing
     // settings.json files still resolve correctly.
@@ -205,6 +207,7 @@ export class SettingsDefaultsManager {
     CLAUDE_MEM_SERVER_BETA_API_KEY: '',                     // Legacy local hook API key (read as fallback when CLAUDE_MEM_SERVER_API_KEY unset)
     CLAUDE_MEM_SERVER_BETA_PROJECT_ID: '',                  // Legacy Postgres project_id (read as fallback when CLAUDE_MEM_SERVER_PROJECT_ID unset)
     CLAUDE_MEM_PROJECT_NAME_SOURCE: 'path',                 // 'path' (default) = folder/git-root basename; 'git-remote' (alias: 'remote') = derive a stable org/repo slug from the git `origin` URL (survives directory renames). Opt-in; default preserves existing behavior.
+    CLAUDE_MEM_WORKER_AUTOSTART: 'true',                    // When 'false', hooks will NOT lazy-spawn the worker daemon. Default 'true' preserves existing behavior; opt-in for deployments that drive the worker out-of-band (e.g. server-beta-only, where worker-only features like the data viewer/corpus/semantic-injection are intentionally not used).
   };
 
   static getAllDefaults(): SettingsDefaults {
