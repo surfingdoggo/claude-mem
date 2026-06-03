@@ -138,6 +138,30 @@ export class PostgresServerSessionsRepository {
   }
 
   /**
+   * Resolve a session by the platform's content session id (the id hooks send
+   * on each event). Used to link agent_events to their session when the caller
+   * supplies contentSessionId but not serverSessionId. Most-recent wins if a
+   * content session id was ever reused.
+   */
+  async findByContentSessionIdForScope(input: {
+    contentSessionId: string;
+    projectId: string;
+    teamId: string;
+  }): Promise<PostgresServerSession | null> {
+    const row = await queryOne<ServerSessionRow>(
+      this.client,
+      `
+        SELECT * FROM server_sessions
+        WHERE content_session_id = $1 AND project_id = $2 AND team_id = $3
+        ORDER BY started_at DESC
+        LIMIT 1
+      `,
+      [input.contentSessionId, input.projectId, input.teamId]
+    );
+    return row ? mapServerSessionRow(row) : null;
+  }
+
+  /**
    * End a server session by setting `ended_at = now()` if not already set.
    * Idempotent: if `ended_at` is already populated, returns the row unchanged.
    * Returns null if no row matches the (id, project_id, team_id) tuple.

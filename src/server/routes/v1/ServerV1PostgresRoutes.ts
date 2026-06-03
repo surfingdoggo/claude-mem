@@ -168,7 +168,8 @@ export class ServerV1PostgresRoutes implements RouteHandler {
       if (!teamId) return;
       if (!this.ensureProjectAllowed(req, res, body.projectId)) return;
 
-      const insertInput = this.toAgentEventInput(body, teamId);
+      const serverSessionId = await this.resolveServerSessionId(body, teamId);
+      const insertInput = this.toAgentEventInput(body, teamId, serverSessionId);
       let event: PostgresAgentEvent;
       let outbox: PostgresObservationGenerationJob | null = null;
       let enqueueState: EnqueueOutcome = 'skipped';
@@ -246,7 +247,11 @@ export class ServerV1PostgresRoutes implements RouteHandler {
         return;
       }
 
-      const inputs = result.data.map(item => this.toAgentEventInput(item, teamId));
+      const inputs = await Promise.all(
+        result.data.map(async item =>
+          this.toAgentEventInput(item, teamId, await this.resolveServerSessionId(item, teamId)),
+        ),
+      );
 
       let inserted: { event: PostgresAgentEvent; outbox: PostgresObservationGenerationJob | null }[] = [];
       let enqueueResults: EnqueueOutcome[] = [];
@@ -973,13 +978,40 @@ export class ServerV1PostgresRoutes implements RouteHandler {
     return null;
   }
 
-  private toAgentEventInput(body: z.infer<typeof CreateAgentEventSchema>, teamId: string): CreatePostgresAgentEventInput {
+  /**
+   * Link an event to its server session. Hooks send `contentSessionId` on each
+   * event (not `serverSessionId`), so resolve it here; otherwise the event lands
+   * with `server_session_id = null` and downstream generation can't tie the
+   * observation back to its session (e.g. for the session's folder/project
+   * label). An explicit `serverSessionId` always wins; falls back to null when
+   * no session matches.
+   */
+  private async resolveServerSessionId(
+    body: z.infer<typeof CreateAgentEventSchema>,
+    teamId: string,
+  ): Promise<string | null> {
+    if (body.serverSessionId) return body.serverSessionId;
+    if (!body.contentSessionId) return null;
+    const sessionsRepo = new PostgresServerSessionsRepository(this.options.pool);
+    const session = await sessionsRepo.findByContentSessionIdForScope({
+      contentSessionId: body.contentSessionId,
+      projectId: body.projectId,
+      teamId,
+    });
+    return session?.id ?? null;
+  }
+
+  private toAgentEventInput(
+    body: z.infer<typeof CreateAgentEventSchema>,
+    teamId: string,
+    serverSessionId: string | null,
+  ): CreatePostgresAgentEventInput {
     const sourceAdapter = body.sourceType ?? SOURCE_ADAPTER_DEFAULT;
     const occurredAtEpoch = typeof body.occurredAtEpoch === 'number' ? body.occurredAtEpoch : Date.now();
     return {
       projectId: body.projectId,
       teamId,
-      serverSessionId: body.serverSessionId ?? null,
+      serverSessionId,
       sourceAdapter,
       sourceEventId: typeof (body as Record<string, unknown>).sourceEventId === 'string'
         ? ((body as Record<string, unknown>).sourceEventId as string)
