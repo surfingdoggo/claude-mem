@@ -106,6 +106,7 @@ import { SettingsRoutes } from './worker/http/routes/SettingsRoutes.js';
 import { LogsRoutes } from './worker/http/routes/LogsRoutes.js';
 import { MemoryRoutes } from './worker/http/routes/MemoryRoutes.js';
 import { MemoryIngestRoutes } from './worker/http/routes/MemoryIngestRoutes.js';
+import { TranscriptRoutes } from './worker/http/routes/TranscriptRoutes.js';
 import { CorpusRoutes } from './worker/http/routes/CorpusRoutes.js';
 import { ChromaRoutes } from './worker/http/routes/ChromaRoutes.js';
 import { CloudSyncRoutes } from './worker/http/routes/CloudSyncRoutes.js';
@@ -364,6 +365,7 @@ export class WorkerService implements WorkerRef {
     this.server.registerRoutes(new LogsRoutes());
     this.server.registerRoutes(new MemoryRoutes(this.dbManager, 'claude-mem'));
     this.server.registerRoutes(new MemoryIngestRoutes(this.dbManager));
+    this.server.registerRoutes(new TranscriptRoutes(this.dbManager));
     this.server.registerRoutes(new ServerV1Routes({
       getDatabase: () => this.dbManager.getConnection(),
     }));
@@ -1316,6 +1318,11 @@ async function main() {
       process.exit(memoryResult);
       break;
     }
+
+    // NOTE: no `case 'transcript'` here — upstream grew its own (see below), which
+    // dispatches to the same runTranscriptCommand via dynamic import. Our fork's
+    // `ingest` subcommand rides in through that shared dispatcher; adding a second
+    // case would be a duplicate label that silently shadows upstream's.
 
     case 'antigravity-cli': {
       const antigravitySubcommand = process.argv[3];
