@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Features
+- **Claude Code transcript backfill (`transcript ingest`, #2690):** import historical Claude Code session JSONL into memory, one repo at a time. A normalizer flattens each line's `message.content` block array into per-block events (working around the schema DSL's inability to fan out arrays — the gap that left #2690 unimplemented), then reuses the existing observation/summary pipeline. Idempotent by `content_session_id`. `--dry-run` reports estimated observations, tokens, and cost with zero model spend. `--include-subagents` ingests `<session>/subagents/*.jsonl` as their own sessions, inheriting the parent project (not the worktree). Real ingest runs inside the worker over HTTP; dry-run runs client-side.
+
 ## [13.4.0] - 2026-05-29
 
 Clears a large defect backlog (plans 01–11 plus standalone fixes) and adds provider configurability. Test suite moved 46 → 0 failing and typecheck 24 → 0 errors over the branch.
