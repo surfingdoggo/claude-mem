@@ -486,7 +486,14 @@ export async function ensureSdkProcessExit(
   await Promise.race([sigkillExit, sigkillTimeout]);
 }
 
-const TOTAL_PROCESS_HARD_CAP = 10;
+// Absolute ceiling on concurrent SDK subprocesses, sitting above the per-session
+// CLAUDE_MEM_MAX_CONCURRENT_AGENTS pool. Env-configurable (default 10) so a
+// high-throughput batch backfill against a local model — where cloud rate limits
+// don't apply — can lift it. Non-positive / unparseable values fall back to 10.
+const TOTAL_PROCESS_HARD_CAP = (() => {
+  const raw = parseInt(process.env.CLAUDE_MEM_TOTAL_PROCESS_HARD_CAP ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 10;
+})();
 const SLOT_RECHECK_INTERVAL_MS = 5_000;
 const slotWaiters: Array<() => void> = [];
 
