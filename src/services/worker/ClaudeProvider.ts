@@ -163,6 +163,42 @@ export function classifyClaudeError(err: unknown): ClassifiedProviderError {
   return new ClassifiedProviderError(message, { kind: 'transient', cause: err });
 }
 
+/**
+ * One-permit gate that applies backpressure between the message generator
+ * (producer) and the SDK response consumer during backfill (#2690). Without it,
+ * the generator yields the whole pre-queued batch back-to-back, the streaming
+ * SDK coalesces those user messages into a couple of turns, and a single empty
+ * response confirms-away the entire batch un-judged. `wait()` blocks the
+ * generator after each observation until the consumer `release()`s that turn;
+ * a release arriving before its matching wait is latched (counted) so the two
+ * coroutines cannot deadlock regardless of which runs first. Backfill-only —
+ * live capture never constructs a gate, so its behavior is unchanged.
+ */
+class TurnGate {
+  private pending = 0;
+  private resolver: (() => void) | null = null;
+
+  wait(): Promise<void> {
+    if (this.pending > 0) {
+      this.pending--;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.resolver = resolve;
+    });
+  }
+
+  release(): void {
+    if (this.resolver) {
+      const resolve = this.resolver;
+      this.resolver = null;
+      resolve();
+    } else {
+      this.pending++;
+    }
+  }
+}
+
 export class ClaudeProvider {
   private dbManager: DatabaseManager;
   private sessionManager: SessionManager;
@@ -198,7 +234,16 @@ export class ClaudeProvider {
     session.lastResultTotalCostUsd = null;
 
     const activeResponseContext = { current: snapshotResponseContext(session) };
-    const messageGenerator = this.createMessageGenerator(session, cwdTracker, activeResponseContext);
+    // Backfill pacing (#2690): gate the generator to one observation per
+    // assistant turn so the pre-queued batch isn't flooded into the SDK and
+    // confirmed-away un-judged. The gate is consulted only when session.backfill
+    // is set — read FRESH in both the generator and the consumer below, never
+    // snapshotted here. session.backfill can flip true just after startSession
+    // begins but before the async generator's body first runs, so capturing it
+    // now would race; we always build the gate and let the runtime checks decide.
+    // Live never sets session.backfill, so it never waits → behavior unchanged.
+    const turnGate = new TurnGate();
+    const messageGenerator = this.createMessageGenerator(session, cwdTracker, activeResponseContext, turnGate);
 
     if (session.memorySessionId) {
       // Observer spawns intentionally opt out of Claude transcript persistence.
@@ -395,6 +440,13 @@ export class ClaudeProvider {
             modelId,
             activeResponseContext.current
           );
+
+          // Release the backfill pacing gate now that this turn is fully
+          // processed, letting the generator yield the next observation. Only
+          // active for backfill; live never waits, so it never needs releasing.
+          if (session.backfill) {
+            turnGate.release();
+          }
         }
 
         if (message.type === 'result') {
@@ -469,7 +521,8 @@ export class ClaudeProvider {
   private async *createMessageGenerator(
     session: ActiveSession,
     cwdTracker: { lastCwd: string | undefined },
-    activeResponseContext: { current: ReturnType<typeof snapshotResponseContext> }
+    activeResponseContext: { current: ReturnType<typeof snapshotResponseContext> },
+    turnGate: TurnGate | null = null
   ): AsyncIterableIterator<SDKUserMessage> {
     const mode = ModeManager.getInstance().getActiveMode();
 
@@ -482,9 +535,10 @@ export class ClaudeProvider {
       promptType: isInitPrompt ? 'INIT' : 'CONTINUATION'
     });
 
+    const backfill = session.backfill ?? false;
     const initPrompt = isInitPrompt
-      ? buildInitPrompt(session.project, session.contentSessionId, session.userPrompt, mode)
-      : buildContinuationPrompt(session.userPrompt, session.lastPromptNumber, session.contentSessionId, mode);
+      ? buildInitPrompt(session.project, session.contentSessionId, session.userPrompt, mode, backfill)
+      : buildContinuationPrompt(session.userPrompt, session.lastPromptNumber, session.contentSessionId, mode, backfill);
     activeResponseContext.current = snapshotResponseContext(session);
 
     session.conversationHistory.push({ role: 'user', content: initPrompt });
@@ -522,7 +576,7 @@ export class ClaudeProvider {
           tool_output: JSON.stringify(message.tool_response),
           created_at_epoch: Date.now(),
           cwd: message.cwd
-        });
+        }, session.backfill ?? false);
         activeResponseContext.current = snapshotResponseContext(session);
 
         session.conversationHistory.push({ role: 'user', content: obsPrompt });
@@ -539,6 +593,14 @@ export class ClaudeProvider {
           parent_tool_use_id: null,
           isSynthetic: true
         };
+
+        // Backfill pacing: block until the consumer has processed this
+        // observation's turn before yielding the next, so each observation gets
+        // its own record/skip decision instead of being batch-confirmed. Only
+        // active for backfill; live never waits.
+        if (session.backfill && turnGate) {
+          await turnGate.wait();
+        }
       } else if (message.type === 'summarize') {
         const summaryPrompt = buildSummaryPrompt({
           id: session.sessionDbId,

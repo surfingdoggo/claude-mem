@@ -44,6 +44,7 @@ export type IngestResult =
 
 export interface ObservationPayload {
   contentSessionId: string;
+  backfill?: boolean;
   toolName: string;
   toolInput: unknown;
   toolResponse: unknown;
@@ -119,6 +120,7 @@ export async function ingestObservation(payload: ObservationPayload): Promise<In
     : '{}';
 
   await sessionManager.queueObservation(sessionDbId, {
+    backfill: payload.backfill,
     tool_name: payload.toolName,
     tool_input: cleanedToolInput,
     tool_response: cleanedToolResponse,
