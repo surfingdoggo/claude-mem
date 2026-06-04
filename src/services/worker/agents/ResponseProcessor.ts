@@ -18,8 +18,15 @@ import { broadcastObservation, broadcastSummary } from './ObservationBroadcaster
 
 /**
  * Consecutive non-XML observer outputs tolerated before we kill and respawn the
- * SDK session (plan-11, #2485). Idle and prose both count; poisoned triggers an
- * immediate respawn regardless of the count.
+ * SDK session (plan-11, #2485). Only `prose` (unexpected conversational output)
+ * counts toward this threshold; `poisoned` triggers an immediate respawn
+ * regardless of the count; `idle` (an empty response) does NOT count — it is the
+ * model correctly following skip_guidance ("return an empty response only"), not
+ * a malfunction. Counting idle skips here regressed backfill to zero
+ * observations (#2749): a finished session replayed as a burst opens with a run
+ * of routine tools (ls/Read/git) that the model rightly skips, yielding
+ * consecutive idles that tripped the respawn threshold and tore the batch down
+ * before any substantive observation was produced.
  */
 export const INVALID_OUTPUT_RESPAWN_THRESHOLD = 3;
 
@@ -49,13 +56,19 @@ export async function processAgentResponse(
     const outputClass = classifyObserverOutput(text);
     const preview = previewOutput(text);
 
-    session.consecutiveInvalidOutputs = (session.consecutiveInvalidOutputs ?? 0) + 1;
+    // `idle` (empty response) is an INSTRUCTED skip per skip_guidance, not a
+    // malfunction — it must not push the session toward a respawn. Only `prose`
+    // accumulates; `poisoned` is handled immediately below regardless of count.
+    if (outputClass !== 'idle') {
+      session.consecutiveInvalidOutputs = (session.consecutiveInvalidOutputs ?? 0) + 1;
+    }
+    const consecutiveInvalidOutputs = session.consecutiveInvalidOutputs ?? 0;
 
     logger.warn('PARSER', `${agentName} returned non-XML ${outputClass} response — ignoring queued batch`, {
       sessionId: session.sessionDbId,
       outputClass,
       preview,
-      consecutiveInvalidOutputs: session.consecutiveInvalidOutputs,
+      consecutiveInvalidOutputs,
     });
 
     // Recover from poison (plan-11, #2485): a poisoned closure string means the
@@ -64,13 +77,13 @@ export async function processAgentResponse(
     // don't churn the session on benign single-batch misses.
     const mustRespawn =
       outputClass === 'poisoned' ||
-      session.consecutiveInvalidOutputs >= INVALID_OUTPUT_RESPAWN_THRESHOLD;
+      consecutiveInvalidOutputs >= INVALID_OUTPUT_RESPAWN_THRESHOLD;
 
     if (mustRespawn) {
       logger.error('SESSION', `${agentName} session poisoned — killing and respawning, pending messages preserved`, {
         sessionId: session.sessionDbId,
         outputClass,
-        consecutiveInvalidOutputs: session.consecutiveInvalidOutputs,
+        consecutiveInvalidOutputs,
         threshold: INVALID_OUTPUT_RESPAWN_THRESHOLD,
       });
       await sessionManager.respawnPoisonedSession(session.sessionDbId);
