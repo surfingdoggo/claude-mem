@@ -36,7 +36,7 @@ export class ChromaSearchStrategy extends BaseSearchStrategy implements SearchSt
       files,
       limit = SEARCH_CONSTANTS.DEFAULT_LIMIT,
       project,
-      orderBy = 'date_desc'
+      orderBy = 'relevance'
     } = options;
 
     if (!query) {

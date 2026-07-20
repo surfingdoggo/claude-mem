@@ -471,7 +471,7 @@ NEVER fetch full details without filtering first. 10x token savings.`,
         dateStart: { type: 'string', description: 'Start date filter (ISO)' },
         dateEnd: { type: 'string', description: 'End date filter (ISO)' },
         offset: { type: 'number', description: 'Pagination offset' },
-        orderBy: { type: 'string', description: 'Sort order: date_desc or date_asc' }
+        orderBy: { type: 'string', description: 'Sort order: relevance, date_desc, or date_asc' }
       },
       additionalProperties: true
     },

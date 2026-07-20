@@ -4,11 +4,16 @@ import type { ObservationSearchResult, SessionSummarySearchResult, UserPromptSea
 export type { ObservationSearchResult, SessionSummarySearchResult, UserPromptSearchResult, SearchOptions, DateRange };
 
 export const SEARCH_CONSTANTS = {
-  RECENCY_WINDOW_DAYS: 90,
-  RECENCY_WINDOW_MS: 90 * 24 * 60 * 60 * 1000,
+  get RECENCY_WINDOW_DAYS() {
+    const val = process.env.CLAUDE_MEM_SEARCH_WINDOW_DAYS;
+    return val !== undefined && val !== '' ? Number(val) : 90;
+  },
+  get RECENCY_WINDOW_MS() {
+    return this.RECENCY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  },
   DEFAULT_LIMIT: 20,
   CHROMA_BATCH_SIZE: 100
-} as const;
+};
 
 export type ChromaDocType = 'observation' | 'session_summary' | 'user_prompt';
 

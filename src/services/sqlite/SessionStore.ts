@@ -1459,7 +1459,7 @@ export class SessionStore {
     const { orderBy = 'date_desc', limit, project, type, concepts, files } = options;
     const preserveIdOrder = orderBy === 'relevance';
     const orderClause = preserveIdOrder ? '' : `ORDER BY created_at_epoch ${orderBy === 'date_asc' ? 'ASC' : 'DESC'}`;
-    const limitClause = limit ? `LIMIT ${limit}` : '';
+    const limitClause = limit && !preserveIdOrder ? `LIMIT ${limit}` : '';
 
     const placeholders = ids.map(() => '?').join(',');
     const params: any[] = [...ids];
@@ -1517,7 +1517,11 @@ export class SessionStore {
     if (!preserveIdOrder) return rows;
 
     const rowMap = new Map(rows.map(r => [r.id, r]));
-    return ids.map(id => rowMap.get(id)).filter((r): r is ObservationSearchResult => !!r);
+    let finalRows = ids.map(id => rowMap.get(id)).filter((r): r is ObservationSearchResult => !!r);
+    if (limit) {
+      finalRows = finalRows.slice(0, limit);
+    }
+    return finalRows;
   }
 
   getSummaryForSession(memorySessionId: string): {
@@ -2117,7 +2121,7 @@ export class SessionStore {
     const { orderBy = 'date_desc', limit, project } = options;
     const preserveIdOrder = orderBy === 'relevance';
     const orderClause = preserveIdOrder ? '' : `ORDER BY created_at_epoch ${orderBy === 'date_asc' ? 'ASC' : 'DESC'}`;
-    const limitClause = limit ? `LIMIT ${limit}` : '';
+    const limitClause = limit && !preserveIdOrder ? `LIMIT ${limit}` : '';
     const placeholders = ids.map(() => '?').join(',');
     const params: any[] = [...ids];
 
@@ -2137,7 +2141,11 @@ export class SessionStore {
     if (!preserveIdOrder) return rows;
 
     const rowMap = new Map(rows.map(r => [r.id, r]));
-    return ids.map(id => rowMap.get(id)).filter((r): r is SessionSummarySearchResult => !!r);
+    let finalRows = ids.map(id => rowMap.get(id)).filter((r): r is SessionSummarySearchResult => !!r);
+    if (limit) {
+      finalRows = finalRows.slice(0, limit);
+    }
+    return finalRows;
   }
 
   getUserPromptsByIds(
@@ -2149,7 +2157,7 @@ export class SessionStore {
     const { orderBy = 'date_desc', limit, project } = options;
     const preserveIdOrder = orderBy === 'relevance';
     const orderClause = preserveIdOrder ? '' : `ORDER BY up.created_at_epoch ${orderBy === 'date_asc' ? 'ASC' : 'DESC'}`;
-    const limitClause = limit ? `LIMIT ${limit}` : '';
+    const limitClause = limit && !preserveIdOrder ? `LIMIT ${limit}` : '';
     const placeholders = ids.map(() => '?').join(',');
     const params: any[] = [...ids];
 
@@ -2172,7 +2180,11 @@ export class SessionStore {
     if (!preserveIdOrder) return rows;
 
     const rowMap = new Map(rows.map(r => [r.id, r]));
-    return ids.map(id => rowMap.get(id)).filter((r): r is UserPromptRecord => !!r);
+    let finalRows = ids.map(id => rowMap.get(id)).filter((r): r is UserPromptRecord => !!r);
+    if (limit) {
+      finalRows = finalRows.slice(0, limit);
+    }
+    return finalRows;
   }
 
   getTimelineAroundTimestamp(

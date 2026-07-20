@@ -152,11 +152,15 @@ export class SearchManager {
   async search(args: any): Promise<any> {
     const normalized = this.normalizeParams(args);
     const { query, type, obs_type, concepts, files, format, ...options } = normalized;
+    if (!options.orderBy) {
+      options.orderBy = query ? 'relevance' : 'date_desc';
+    }
     let observations: ObservationSearchResult[] = [];
     let sessions: SessionSummarySearchResult[] = [];
     let prompts: UserPromptSearchResult[] = [];
     let chromaFailed = false;
     let chromaFailureReason: { message: string; isConnectionError: boolean } | null = null;
+    let chromaIdsInOrder: number[] | null = null;
 
     const searchObservations = !type || type === 'observations';
     const searchSessions = !type || type === 'sessions';
@@ -234,6 +238,8 @@ export class SearchManager {
               && (!endEpoch || meta.created_at_epoch <= endEpoch)
           })).filter(item => item.isRecent);
 
+          chromaIdsInOrder = recentMetadata.map(item => item.id);
+
           logger.debug('SEARCH', dateRange ? 'Results within user date range' : 'Results within 90-day window', { count: recentMetadata.length });
 
           const obsIds: number[] = [];
@@ -256,10 +262,10 @@ export class SearchManager {
             observations = this.sessionStore.getObservationsByIds(obsIds, obsOptions);
           }
           if (sessionIds.length > 0) {
-            sessions = this.sessionStore.getSessionSummariesByIds(sessionIds, { orderBy: 'date_desc', limit: options.limit, project: options.project });
+            sessions = this.sessionStore.getSessionSummariesByIds(sessionIds, { orderBy: options.orderBy, limit: options.limit, project: options.project });
           }
           if (promptIds.length > 0) {
-            prompts = this.sessionStore.getUserPromptsByIds(promptIds, { orderBy: 'date_desc', limit: options.limit, project: options.project });
+            prompts = this.sessionStore.getUserPromptsByIds(promptIds, { orderBy: options.orderBy, limit: options.limit, project: options.project });
           }
         } else {
           logger.debug('SEARCH', 'ChromaDB found no matches (final result, no FTS5 fallback)', {});
@@ -365,6 +371,13 @@ export class SearchManager {
       allResults.sort((a, b) => b.epoch - a.epoch);
     } else if (options.orderBy === 'date_asc') {
       allResults.sort((a, b) => a.epoch - b.epoch);
+    } else if (options.orderBy === 'relevance' && chromaIdsInOrder) {
+      const idOrder = new Map(chromaIdsInOrder.map((id, index) => [id, index]));
+      allResults.sort((a, b) => {
+        const aIndex = idOrder.get(a.data.id) ?? Infinity;
+        const bIndex = idOrder.get(b.data.id) ?? Infinity;
+        return aIndex - bIndex;
+      });
     }
 
     const limitedResults = allResults.slice(0, options.limit || 20);
