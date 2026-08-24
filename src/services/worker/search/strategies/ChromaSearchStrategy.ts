@@ -3,6 +3,7 @@ import {
   StrategySearchOptions,
   StrategySearchResult,
   SEARCH_CONSTANTS,
+  resolveRecencyStartEpoch,
   ChromaMetadata,
   DateRange,
   ObservationSearchResult,
@@ -196,7 +197,8 @@ export class ChromaSearchStrategy {
           : new Date(dateRange.end).getTime();
       }
     } else {
-      startEpoch = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
+      // FORK: configurable window; null = no lower bound (see search/types.ts).
+      startEpoch = resolveRecencyStartEpoch() ?? undefined;
     }
 
     const metadataByIdMap = new Map<number, ChromaMetadata>();

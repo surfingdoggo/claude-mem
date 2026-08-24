@@ -14,7 +14,8 @@ import { ModeManager } from '../domain/ModeManager.js';
 
 import {
   SearchOrchestrator,
-  SEARCH_CONSTANTS
+  SEARCH_CONSTANTS,
+  resolveRecencyStartEpoch
 } from './search/index.js';
 import { ResultFormatter } from './search/ResultFormatter.js';
 import { ChromaUnavailableError } from './search/errors.js';
@@ -112,13 +113,19 @@ export class SearchManager {
     logger.debug('SEARCH', 'Chroma returned semantic matches', { matchCount: chromaResults?.ids?.length ?? 0 });
 
     if (chromaResults?.ids && chromaResults.ids.length > 0) {
-      const ninetyDaysAgo = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
-      const recentIds = chromaResults.ids.filter((_id, idx) => {
-        const meta = chromaResults.metadatas[idx];
-        return meta && meta.created_at_epoch > ninetyDaysAgo;
-      });
+      // FORK: window is configurable; null = no lower bound (see types.ts).
+      const startEpoch = resolveRecencyStartEpoch();
+      const recentIds = startEpoch === null
+        ? chromaResults.ids
+        : chromaResults.ids.filter((_id, idx) => {
+            const meta = chromaResults.metadatas[idx];
+            return meta && meta.created_at_epoch > startEpoch;
+          });
 
-      logger.debug('SEARCH', 'Results within 90-day window', { count: recentIds.length });
+      logger.debug('SEARCH', 'Results within recency window', {
+        count: recentIds.length,
+        windowed: startEpoch !== null
+      });
 
       if (recentIds.length > 0) {
         return hydrate(recentIds);
@@ -397,7 +404,9 @@ export class SearchManager {
             : new Date(dateRange.end).getTime();
         }
       } else {
-        startEpoch = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
+        // FORK: configurable window; null leaves startEpoch undefined, and the
+        // isRecent check below already treats a falsy startEpoch as "no bound".
+        startEpoch = resolveRecencyStartEpoch() ?? undefined;
       }
 
       const recentMetadata = chromaResults.metadatas.map((meta, idx) => ({
