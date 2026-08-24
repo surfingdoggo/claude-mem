@@ -1,5 +1,6 @@
 
 import type { ObservationSearchResult, SessionSummarySearchResult, UserPromptSearchResult, SearchOptions, DateRange } from '../../sqlite/types.js';
+import { loadFromFileOnce } from '../../../shared/hook-settings.js';
 
 export type { ObservationSearchResult, SessionSummarySearchResult, UserPromptSearchResult, SearchOptions, DateRange };
 
@@ -36,8 +37,24 @@ export const SEARCH_CONSTANTS = {
 export function resolveRecencyWindowMs(
   env: NodeJS.ProcessEnv = process.env
 ): number | null {
-  const raw = env.CLAUDE_MEM_SEARCH_WINDOW_DAYS;
-  if (raw === undefined || raw.trim() === '') return SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
+  // process.env first, settings.json second — the same precedence
+  // useRemoteProjectName() uses, and for the same reason.
+  //
+  // settings.json does NOT populate process.env: it is read separately via
+  // loadFromFileOnce(). An env-only resolver therefore ignores the settings
+  // file completely, so writing CLAUDE_MEM_SEARCH_WINDOW_DAYS there is a
+  // SILENT NO-OP — the setting appears configured, nothing changes, and the
+  // 90-day cut stays in place. That is the exact shape of bug this patch
+  // exists to fix, so it must not be the shape of the fix.
+  let raw = env.CLAUDE_MEM_SEARCH_WINDOW_DAYS;
+  if (raw === undefined || raw.trim() === '') {
+    try {
+      raw = loadFromFileOnce().CLAUDE_MEM_SEARCH_WINDOW_DAYS;
+    } catch {
+      raw = undefined;
+    }
+  }
+  if (raw === undefined || String(raw).trim() === '') return SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
 
   const days = Number(raw);
   if (!Number.isFinite(days) || days < 0) return SEARCH_CONSTANTS.RECENCY_WINDOW_MS;

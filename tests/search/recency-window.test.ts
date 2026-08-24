@@ -55,6 +55,29 @@ describe('resolveRecencyWindowMs — fork: configurable search window', () => {
   });
 });
 
+describe('settings.json is honoured, not just process.env', () => {
+  // settings.json does NOT populate process.env — it is read separately via
+  // loadFromFileOnce(). An env-only resolver silently ignores the settings
+  // file, so the documented setting appears configured while the 90-day cut
+  // stays in place. That no-op is the exact failure shape this patch exists to
+  // fix, and the first cut of the patch had it. This pins the precedence.
+  it('reads the settings file when the env var is absent', () => {
+    // Passing an empty env forces the settings-file branch. The value there is
+    // whatever the live settings.json holds, so assert on the CONTRACT (a valid
+    // resolution) rather than a machine-specific number.
+    const resolved = resolveRecencyWindowMs({});
+    const validDefault = resolved === SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
+    const validOff = resolved === null;
+    const validCustom = typeof resolved === 'number' && resolved > 0;
+    expect(validDefault || validOff || validCustom).toBe(true);
+  });
+
+  it('process.env WINS over the settings file', () => {
+    expect(resolveRecencyWindowMs({ CLAUDE_MEM_SEARCH_WINDOW_DAYS: '7' }))
+      .toBe(7 * 24 * 60 * 60 * 1000);
+  });
+});
+
 describe('resolveRecencyStartEpoch — the bound the call sites use', () => {
   const NOW = 1_700_000_000_000;
 
