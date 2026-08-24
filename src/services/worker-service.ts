@@ -96,7 +96,6 @@ import { DEFAULT_CONFIG_PATH, DEFAULT_STATE_PATH, expandHomePath, filterNativeHo
 import { TranscriptWatcher } from './transcripts/watcher.js';
 import { SyncApply } from './sync/SyncApply.js';
 import { SyncClient } from './sync/SyncClient.js';
-import { runMemoryCommand } from './memory/cli.js';
 
 import { ViewerRoutes } from './worker/http/routes/ViewerRoutes.js';
 import { SessionRoutes } from './worker/http/routes/SessionRoutes.js';
@@ -1313,6 +1312,14 @@ async function main() {
     case 'memory': {
       // Auto-memory ingest (sibling to transcript). Dry-run runs client-side;
       // the real store reaches the worker over HTTP from inside runMemoryCommand.
+      //
+      // DYNAMIC import, matching the 'transcript' case below. A static import
+      // here closes an import cycle back into this module, and the symptom is
+      // not a stack trace: bun reports "Export named 'buildStatusOutput' not
+      // found in module worker-service.ts" and every test in files that import
+      // this module dies at load. tsc --noEmit stays green throughout, so the
+      // typechecker will not warn you. Keep this lazy.
+      const { runMemoryCommand } = await import('./memory/cli.js');
       const subcommand = process.argv[3];
       const memoryResult = await runMemoryCommand(subcommand, process.argv.slice(4));
       process.exit(memoryResult);

@@ -110,6 +110,21 @@ describe('getProjectName', () => {
 });
 
 describe('getProjectContext', () => {
+  // FORK: pin path mode for this whole block. getProjectContext branches on
+  // CLAUDE_MEM_PROJECT_NAME_SOURCE, and without this pin the resolver falls
+  // through to the developer's real settings.json — so on a machine configured
+  // for remote mode (ours is) every worktree-compositing assertion below fails
+  // with no code change involved. The remote-mode behaviour has its own
+  // dedicated tests; these cover upstream's path-mode contract.
+  const previousSource = process.env.CLAUDE_MEM_PROJECT_NAME_SOURCE;
+  beforeAll(() => {
+    process.env.CLAUDE_MEM_PROJECT_NAME_SOURCE = 'path';
+  });
+  afterAll(() => {
+    if (previousSource === undefined) delete process.env.CLAUDE_MEM_PROJECT_NAME_SOURCE;
+    else process.env.CLAUDE_MEM_PROJECT_NAME_SOURCE = previousSource;
+  });
+
   it('returns primary project name for normal path', () => {
     const ctx = getProjectContext('/home/user/my-project');
     expect(ctx.primary).toBe('my-project');

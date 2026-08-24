@@ -13,21 +13,16 @@ mock.module('../../src/shared/hook-settings.js', () => ({
 
 // For the default (autostart on) path, present a healthy/version-matched worker
 // so ensureWorkerRunning() resolves true without an actual spawn.
-// NB: supervisor/index.js is imported by the spawn chain (ProcessManager) for
-// getSupervisor() too — mocking the module replaces the whole namespace, so we
-// must stub every export the chain pulls in or its static import fails to load.
-// getSupervisor() is not reached on these paths (the worker reports 'alive'); the
-// stub exists only so the import resolves.
-mock.module('../../src/supervisor/index.js', () => ({
-  validateWorkerPidFile: () => 'alive',
-  getSupervisor: () => ({
-    assertCanSpawn: () => {},
-    registerProcess: () => {},
-    unregisterProcess: () => {},
-    getRegistry: () => ({ reapSession: () => {} }),
-    stop: () => Promise.resolve(),
-  }),
-}));
+//
+// DELIBERATELY NOT MOCKING src/supervisor/index.js. An earlier revision stubbed
+// that whole namespace (validateWorkerPidFile: () => 'alive') "only so the
+// static import resolves". bun's mock.module is PROCESS-GLOBAL and mock.restore()
+// does not undo it, so the stub outlived this file and every later test that
+// imported the real supervisor got the stub instead: tests/supervisor/index.test.ts
+// then failed with `expected "missing", received "alive"` — six failures whose
+// stack traces point at innocent files, and which pass when run in isolation.
+// Nothing here needs the stub: the health fetch is mocked below, so
+// ensureWorkerAliveOnce() resolves without ever reaching getSupervisor().
 mock.module('../../src/services/infrastructure/index.js', () => ({
   checkVersionMatch: () =>
     Promise.resolve({ matches: true, pluginVersion: '13.4.1', workerVersion: '13.4.1' }),

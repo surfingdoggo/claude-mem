@@ -66,7 +66,7 @@ export class MemoryIngestRoutes extends BaseRouteHandler {
 
         if (chromaSync) {
           chromaSync
-            .syncObservation(result.id, memorySessionId, obs.project, observation, 0, result.createdAtEpoch, 0)
+            .syncObservation(result.id, memorySessionId, obs.project, observation, 0, result.createdAtEpoch)
             .catch((err: unknown) => {
               logger.error('CHROMA', 'memory-ingest Chroma sync failed', { id: result.id }, err as Error);
             });

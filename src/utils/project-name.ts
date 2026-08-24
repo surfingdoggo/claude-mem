@@ -19,9 +19,18 @@ import { loadFromFileOnce } from '../shared/hook-settings.js';
  */
 function useRemoteProjectName(): boolean {
   try {
-    const source = String(loadFromFileOnce().CLAUDE_MEM_PROJECT_NAME_SOURCE ?? 'path')
-      .trim()
-      .toLowerCase();
+    // process.env first, settings.json second — the same precedence every other
+    // setting uses (SettingsDefaultsManager.get: process.env[key] ?? DEFAULTS).
+    // The original patch read ONLY the settings file, which meant the documented
+    // CLAUDE_MEM_PROJECT_NAME_SOURCE environment variable silently did nothing,
+    // and made every test that touches getProjectContext depend on the developer
+    // machine's settings.json: on a box configured for remote mode, upstream's
+    // worktree-compositing tests fail with no code change involved.
+    const raw =
+      process.env.CLAUDE_MEM_PROJECT_NAME_SOURCE ??
+      loadFromFileOnce().CLAUDE_MEM_PROJECT_NAME_SOURCE ??
+      'path';
+    const source = String(raw).trim().toLowerCase();
     return source === 'git-remote' || source === 'remote';
   } catch {
     return false;
