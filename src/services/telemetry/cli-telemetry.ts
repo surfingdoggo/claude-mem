@@ -72,6 +72,12 @@ async function postCaptureEvent(
   properties: Record<string, unknown>,
   signal: AbortSignal
 ): Promise<void> {
+  // FORK PATCH (telemetry/consent.ts): second layer of the build-level kill.
+  // Consent already resolves false everywhere, so nothing should reach here —
+  // this makes that structural rather than a promise. A future upstream call
+  // site that forgets the consent gate egresses nothing.
+  return;
+
   await fetch(`${getTelemetryHost()}/capture/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -33,8 +33,40 @@ export type TelemetryConsentExplanation = {
 };
 
 /**
- * Resolves whether telemetry is allowed AND which layer decided it.
- * Pure function — no I/O.
+ * FORK PATCH — telemetry is OFF AT BUILD LEVEL and cannot be turned back on.
+ *
+ * Owner ruling, 2026-08-24: "oh yuck, no phoning home at all."
+ *
+ * Upstream defaults telemetry ON (opt-out) as of 13.5.0, and 13.6.0 additionally
+ * ships a ONE-TIME HISTORICAL BACKFILL that walks the local database and emits
+ * inferred-install/activity events on first start. In an opt-out design the
+ * kill-switch is an env var, which makes a single missing export — a cron, a
+ * systemd unit, a bare `node worker-service.cjs`, a future wrapper that
+ * sanitizes the environment — enough to silently start sending. That is a
+ * failure mode we do not accept, so the fork does not rely on configuration at
+ * all: consent is resolved to `false` unconditionally, here, at the one
+ * chokepoint every send path funnels through.
+ *
+ * This is deliberately stronger than the upstream precedence chain: an explicit
+ * CLAUDE_MEM_TELEMETRY=1 does NOT re-enable it. Nothing does, short of editing
+ * this function. `DO_NOT_TRACK` / `CLAUDE_MEM_TELEMETRY=0` are still set in our
+ * environment as belt-and-braces, but nothing here is load-bearing on them.
+ *
+ * Reported `source` stays 'DO_NOT_TRACK' so `claude-mem telemetry status` and
+ * the install flow render "disabled" through their existing, unmodified paths.
+ *
+ * The upstream chain is preserved verbatim below as dead code, so a future
+ * rebase can see exactly what was overridden rather than guessing.
+ */
+export function explainTelemetryConsent(
+  _env: NodeJS.ProcessEnv,
+  _config: TelemetryConfig | null
+): TelemetryConsentExplanation {
+  return { enabled: false, source: 'DO_NOT_TRACK' };
+}
+
+/**
+ * Upstream's precedence chain, retained for rebase reference only. Not called.
  *
  * Precedence (first match wins):
  * 1. DO_NOT_TRACK set (truthy) -> always off
@@ -42,7 +74,7 @@ export type TelemetryConsentExplanation = {
  * 3. telemetry.json config: enabled === true -> on, enabled === false -> off
  * 4. Default: on (opt-out — anonymous events only; see docs.claude-mem.ai/telemetry)
  */
-export function explainTelemetryConsent(
+export function explainTelemetryConsentUpstream(
   env: NodeJS.ProcessEnv,
   config: TelemetryConfig | null
 ): TelemetryConsentExplanation {
@@ -83,10 +115,12 @@ export function resolveTelemetryConsent(
  * capture is always additionally gated by the normal consent chain upstream, so
  * "consent off" already implies "no errors". Pure — no I/O.
  */
-export function isErrorTelemetryEnabled(env: NodeJS.ProcessEnv): boolean {
-  const value = env.CLAUDE_MEM_TELEMETRY_ERRORS?.toLowerCase();
-  if (value === '0' || value === 'false' || value === 'off') return false;
-  return true;
+export function isErrorTelemetryEnabled(_env: NodeJS.ProcessEnv): boolean {
+  // FORK PATCH (see explainTelemetryConsent above): hard off. Error capture
+  // sends redacted exception messages and stack frames — the most identifying
+  // payload in the whole telemetry surface, since stack frames carry absolute
+  // paths. "No phoning home at all" covers this path explicitly.
+  return false;
 }
 
 /** Absolute path of telemetry.json inside the claude-mem data dir. */

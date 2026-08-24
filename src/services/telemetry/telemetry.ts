@@ -96,7 +96,14 @@ function getClient(): PostHog {
       // unconditionally in front of autocapture. Non-exception events pass
       // through untouched. (BeforeSendFn = (event|null) => event|null,
       // types.d.ts:116).
-      before_send: errorBeforeSend,
+      //
+      // FORK PATCH (telemetry/consent.ts): second layer of the build-level kill
+      // for the WORKER transport. before_send runs for EVERY event immediately
+      // before ingest, including anything posthog-node's own autocapture emits
+      // out-of-band, so returning null unconditionally drops all of it at the
+      // last point we control. Consent already resolves false everywhere; this
+      // makes "nothing leaves this machine" structural rather than a promise.
+      before_send: () => null,
     });
   }
   return client;
