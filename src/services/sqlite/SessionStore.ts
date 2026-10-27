@@ -5,6 +5,7 @@ import { logger } from '../../utils/logger.js';
 import {
   TableColumnInfo,
   IndexInfo,
+  ForeignKeyInfo,
   TableNameRow,
   SchemaVersion,
   ObservationRecord,
@@ -99,6 +100,8 @@ export class SessionStore {
     this.renameSessionIdColumns();
     this.addFailedAtEpochColumn();
     this.addOnUpdateCascadeToForeignKeys();
+    this.ensureSessionSummariesUpdateCascade();
+    this.ensureSessionSummariesFtsTriggers();
     this.addObservationContentHashColumn();
     this.addSessionCustomTitleColumn();
     this.addSessionPlatformSourceColumn();
@@ -1128,7 +1131,7 @@ export class SessionStore {
         prompt_number INTEGER,
         created_at TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
-        FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE
+        FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE ON UPDATE CASCADE
       )
     `);
 
@@ -1645,6 +1648,84 @@ export class SessionStore {
     if (hasSummariesFTS) {
       this.db.run(ftsTriggersSQL);
     }
+  }
+
+  private ensureSessionSummariesUpdateCascade(): void {
+    // Not gated on schema_versions 21: the v7 UNIQUE-constraint rebuild can run
+    // after 21 is stamped and recreate session_summaries with ON DELETE CASCADE
+    // only. Without ON UPDATE CASCADE, re-keying an sdk_session that already has
+    // a summary fails with "FOREIGN KEY constraint failed" and kills its
+    // generator. Rebuild from the live DDL so no later column is dropped.
+    const fks = this.db.query('PRAGMA foreign_key_list(session_summaries)').all() as ForeignKeyInfo[];
+    const fk = fks.find(f => f.table === 'sdk_sessions' && f.from === 'memory_session_id');
+    if (!fk || fk.on_update === 'CASCADE') return;
+
+    const table = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='session_summaries'").get() as { sql: string };
+    const fkClause = /(REFERENCES\s+sdk_sessions\s*\(\s*memory_session_id\s*\)\s+ON\s+DELETE\s+CASCADE)/i;
+    if (!fkClause.test(table.sql)) {
+      logger.warn('DB', 'session_summaries FK lacks ON UPDATE CASCADE but its DDL is not in the expected shape; leaving it');
+      return;
+    }
+    const newTableSQL = table.sql
+      .replace(fkClause, '$1 ON UPDATE CASCADE')
+      .replace(/CREATE TABLE\s+"?session_summaries"?/i, 'CREATE TABLE session_summaries_new');
+    const dependents = this.db.query(
+      "SELECT sql FROM sqlite_master WHERE tbl_name='session_summaries' AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+    ).all() as { sql: string }[];
+
+    this.db.run('PRAGMA foreign_keys = OFF');
+    this.db.run('BEGIN TRANSACTION');
+    try {
+      this.db.run('DROP TABLE IF EXISTS session_summaries_new');
+      this.db.run(newTableSQL);
+      this.db.run('INSERT INTO session_summaries_new SELECT * FROM session_summaries');
+      this.db.run('DROP TABLE session_summaries');
+      this.db.run('ALTER TABLE session_summaries_new RENAME TO session_summaries');
+      for (const dep of dependents) {
+        this.db.run(dep.sql);
+      }
+      this.db.run('COMMIT');
+      logger.info('DB', 'Restored ON UPDATE CASCADE on the session_summaries FK (d9754a31)');
+    } catch (error) {
+      this.db.run('ROLLBACK');
+      throw error instanceof Error ? error : new Error(String(error));
+    } finally {
+      this.db.run('PRAGMA foreign_keys = ON');
+    }
+  }
+
+  private ensureSessionSummariesFtsTriggers(): void {
+    // The FTS triggers are only created alongside the FTS table, so a
+    // session_summaries rebuild that drops them leaves new summaries
+    // unindexed for good. Recreate them and re-sync the index.
+    const hasSummariesFTS = (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session_summaries_fts'").all() as { name: string }[]).length > 0;
+    if (!hasSummariesFTS) return;
+
+    const triggers = (this.db.query(
+      "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='session_summaries' AND name IN ('session_summaries_ai', 'session_summaries_ad', 'session_summaries_au')"
+    ).all() as { name: string }[]).length;
+    if (triggers === 3) return;
+
+    this.db.run(`
+      CREATE TRIGGER IF NOT EXISTS session_summaries_ai AFTER INSERT ON session_summaries BEGIN
+        INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
+        VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS session_summaries_ad AFTER DELETE ON session_summaries BEGIN
+        INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
+        VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS session_summaries_au AFTER UPDATE ON session_summaries BEGIN
+        INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
+        VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
+        INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
+        VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
+      END;
+    `);
+    this.db.run("INSERT INTO session_summaries_fts(session_summaries_fts) VALUES('rebuild')");
+    logger.info('DB', 'Restored session_summaries FTS triggers and rebuilt the index (d9754a31)');
   }
 
   private addObservationContentHashColumn(): void {
