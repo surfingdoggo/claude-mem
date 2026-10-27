@@ -40,7 +40,29 @@ export type TelemetryConsentExplanation = {
  * 1. DO_NOT_TRACK set (truthy) -> always off
  * 2. CLAUDE_MEM_TELEMETRY env: '0'/'false'/'off' -> off, '1'/'true'/'on' -> on
  * 3. telemetry.json config: enabled === true -> on, enabled === false -> off
- * 4. Default: on (opt-out — anonymous events only; see docs.claude-mem.ai/telemetry)
+ * 4. FORK PATCH — Default: OFF. Upstream defaults this ON (opt-out) as of
+ *    13.5.0, and ships a one-time HISTORICAL BACKFILL (backfill.ts) that walks
+ *    the local database and emits inferred install/activity events on first
+ *    start. v15 adds work-state rollups, skill_invoked and usage reports, all
+ *    behind this same chain.
+ *
+ *    Owner ruling, 2026-08-24: "oh yuck, no phoning home at all." Re-affirmed
+ *    for the v15.3.0 rebase, 2026-10-27: "telemetry stays off except for our
+ *    own observability."
+ *
+ *    The default is flipped here, in the build, rather than left to an env var,
+ *    because in an opt-out design a single missing export — a cron, a systemd
+ *    unit, a bare worker-service.cjs invocation, a wrapper that sanitizes the
+ *    environment — is enough to silently start sending. Nothing in this fork is
+ *    load-bearing on DO_NOT_TRACK / CLAUDE_MEM_TELEMETRY being present. Do NOT
+ *    set DO_NOT_TRACK to compensate: it is a blanket opt-out that also kills
+ *    our own OTEL exporter. Steps 1-3 are upstream's, unmodified, so this file
+ *    stays cheap to rebase and upstream's own tests still exercise the chain.
+ *
+ *    Egress is additionally blocked at every PostHog transport (telemetry.ts
+ *    before_send, cli-telemetry.ts postCaptureEvent, backfill.ts dedicated
+ *    client) so that a call site which forgets the consent gate still sends
+ *    nothing.
  */
 export function explainTelemetryConsent(
   env: NodeJS.ProcessEnv,
@@ -59,7 +81,7 @@ export function explainTelemetryConsent(
   if (config?.enabled === true) return { enabled: true, source: 'config' };
   if (config?.enabled === false) return { enabled: false, source: 'config' };
 
-  return { enabled: true, source: 'default' };
+  return { enabled: false, source: 'default' };
 }
 
 /**

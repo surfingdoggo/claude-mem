@@ -637,6 +637,11 @@ async function executeHistoricalBackfill(db: Database): Promise<void> {
     maxBatchSize: 5000,
     maxQueueSize: 5000,
     disableGeoip: false,
+    // FORK PATCH (telemetry/consent.ts): egress layer of the build-level kill.
+    // This dedicated client bypasses telemetry.ts's singleton, so it needs its
+    // own block: a consent gate that is ever bypassed must still send nothing
+    // from the historical backfill.
+    before_send: () => null,
   });
 
   // shutdown() swallows fetch errors internally; the public error emitter

@@ -24,17 +24,22 @@ const disabledConfig: TelemetryConfig = {
 };
 
 describe('resolveTelemetryConsent', () => {
-  it('defaults to on (opt-out) with null config and empty env', () => {
-    expect(resolveTelemetryConsent({}, null)).toBe(true);
+  // FORK: upstream's default is ON (opt-out). This fork flips it OFF in the
+  // build — owner ruling 2026-08-24, "oh yuck, no phoning home at all",
+  // re-affirmed 2026-10-27 for v15. These are the regression tests for that
+  // ruling: if a rebase silently restores upstream's default, these go red
+  // instead of the machine quietly starting to send. See consent.ts step 4.
+  it('defaults to OFF with null config and empty env (fork: upstream defaults on)', () => {
+    expect(resolveTelemetryConsent({}, null)).toBe(false);
   });
 
-  it('a config without an enabled decision falls through to the default (on)', () => {
+  it('a config without an enabled decision falls through to the default (off)', () => {
     const undecided: TelemetryConfig = {
       installId: '00000000-0000-4000-8000-000000000002',
       decidedAt: '',
     };
-    expect(resolveTelemetryConsent({}, undecided)).toBe(true);
-    expect(explainTelemetryConsent({}, undecided)).toEqual({ enabled: true, source: 'default' });
+    expect(resolveTelemetryConsent({}, undecided)).toBe(false);
+    expect(explainTelemetryConsent({}, undecided)).toEqual({ enabled: false, source: 'default' });
   });
 
   it('DO_NOT_TRACK=1 beats an enabled config', () => {
@@ -89,7 +94,8 @@ describe('resolveTelemetryConsent', () => {
 
   it('unrecognized CLAUDE_MEM_TELEMETRY values fall through to config', () => {
     expect(resolveTelemetryConsent({ CLAUDE_MEM_TELEMETRY: 'maybe' }, disabledConfig)).toBe(false);
-    expect(resolveTelemetryConsent({ CLAUDE_MEM_TELEMETRY: 'maybe' }, null)).toBe(true);
+    // FORK: no config + unrecognized env lands on the default, which is OFF here.
+    expect(resolveTelemetryConsent({ CLAUDE_MEM_TELEMETRY: 'maybe' }, null)).toBe(false);
   });
 
   it('config enabled=true enables with empty env', () => {
@@ -140,8 +146,9 @@ describe('explainTelemetryConsent', () => {
     });
   });
 
-  it('falls back to default-on (opt-out) with no env and no config', () => {
-    expect(explainTelemetryConsent({}, null)).toEqual({ enabled: true, source: 'default' });
+  // FORK: default flipped off in the build — see the note on resolveTelemetryConsent above.
+  it('falls back to default-OFF with no env and no config (fork: upstream defaults on)', () => {
+    expect(explainTelemetryConsent({}, null)).toEqual({ enabled: false, source: 'default' });
   });
 
   it('unrecognized env values fall through to config/default', () => {
@@ -149,8 +156,9 @@ describe('explainTelemetryConsent', () => {
       enabled: false,
       source: 'config',
     });
+    // FORK: default is OFF.
     expect(explainTelemetryConsent({ CLAUDE_MEM_TELEMETRY: 'maybe' }, null)).toEqual({
-      enabled: true,
+      enabled: false,
       source: 'default',
     });
   });
@@ -259,8 +267,9 @@ describe('telemetry config persistence', () => {
       const config = loadTelemetryConfig();
       expect(config?.installId).toBe(id);
       expect(config?.enabled).toBeUndefined();
-      // The opt-out default must survive the ID bootstrap.
-      expect(explainTelemetryConsent({}, config)).toEqual({ enabled: true, source: 'default' });
+      // FORK: the default must survive the ID bootstrap — and this fork's
+      // default is OFF. Minting an install ID must never be read as consent.
+      expect(explainTelemetryConsent({}, config)).toEqual({ enabled: false, source: 'default' });
     });
 
     it('returns the existing install ID on subsequent calls', () => {
